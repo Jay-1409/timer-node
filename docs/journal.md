@@ -14,3 +14,13 @@ innitially i was going to implement this in node.js along with express.js but ch
  - ~ 11:00 : started the project ( no prior exp with go )
  - 18:18 : a working prototype with documentation ready for v1 release
 
+ **16/aug/2026**
+
+I had not benchmarked this project. so i created some benchmarks for this project today. i also found that there is a probably failure case in the system when all heaps are flooded new tasks will get rejected. so i need an mechanism for this. 
+
+some of my options are i think 
+- spawn new heaps?
+    - maybe spawn new heaps with size increase in power of 2. 
+- increase the size of the heap by powers of 2
+- i will need to benchmark either of these possibilites 
+
