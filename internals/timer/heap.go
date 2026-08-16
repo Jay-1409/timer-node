@@ -27,7 +27,7 @@ func NewTimerHeap(id int, queueSize int, workerCount int) *TimerHeap {
 	}
 
 	heap.Init(&t.Tasks)
-	t.EventHandler = NewTimerEventHandler(id, 1024, workerCount)
+	t.EventHandler = NewTimerEventHandler(id, queueSize, workerCount)
 	t.EventHandler.Handler()
 	return t
 }
