@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -54,6 +55,9 @@ func PrintGridTerminalTable(res *GridResult) {
 }
 
 func SaveGridCSV(res *GridResult, filename string) error {
+	if dir := filepath.Dir(filename); dir != "." && dir != "" {
+		_ = os.MkdirAll(dir, 0755)
+	}
 	f, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -349,5 +353,8 @@ func GenerateInteractivePlotHTML(res *GridResult, filename string) error {
 </body>
 </html>`, string(dataJSON))
 
+	if dir := filepath.Dir(filename); dir != "." && dir != "" {
+		_ = os.MkdirAll(dir, 0755)
+	}
 	return os.WriteFile(filename, []byte(html), 0644)
 }

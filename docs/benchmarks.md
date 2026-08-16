@@ -80,11 +80,29 @@ Sweeps through heap counts ($1, 2, 4, 8, 16$ heaps) with identical workloads to 
 
 ---
 
+### 5. 2D Parameter Grid Exploration & 3D Plotting (`grid`)
+Performs a full 2D grid sweep across Heaps $\times$ Workers per heap, generating a terminal matrix, CSV export, and an **interactive 3D Surface & Heatmap dashboard** (`benchmark_results/drift_plot.html`).
+
+```bash
+# Run grid sweep across 30 configurations:
+make bench-grid
+
+# Or with custom parameter lists:
+./bin/benchmark -scenario grid -heaps-list 1,2,4,8,16,32 -workers-list 1,2,4,8,16 -requests 2000 -delay 1s
+```
+
+All generated reports, CSVs, and interactive dashboards are organized under `benchmark_results/`:
+- `benchmark_results/drift_plot.html`: Interactive 3D Surface Plot & 2D Color Heatmap.
+- `benchmark_results/drift_grid.csv`: Full matrix in CSV format.
+- `benchmark_results/benchmark_report.md`: Markdown summary report.
+
+---
+
 ## Command Line Flags
 
 | Flag | Default | Description |
 |---|---|---|
-| `-scenario` | `throughput` | Benchmark scenario (`throughput`, `accuracy`, `flood`, `scaling`, `all`) |
+| `-scenario` | `throughput` | Benchmark scenario (`throughput`, `accuracy`, `flood`, `scaling`, `grid`, `all`) |
 | `-requests` | `5000` | Total timer requests to schedule |
 | `-concurrency` | `50` | Number of concurrent client worker goroutines |
 | `-rate` | `0` | Max requests per second rate limit (0 = unlimited) |
@@ -95,6 +113,10 @@ Sweeps through heap counts ($1, 2, 4, 8, 16$ heaps) with identical workloads to 
 | `-wave-interval`| `0s` | Time gap between flood waves (default: delay + 500ms) |
 | `-heaps` | `4` | Number of heaps for embedded instance |
 | `-workers` | `4` | Number of notification workers per heap |
+| `-heaps-list` | `1,2,4,8,16,32` | Comma-separated heaps list for grid exploration |
+| `-workers-list` | `1,2,4,8,16` | Comma-separated workers list for grid exploration |
+| `-plot-file` | `benchmark_results/drift_plot.html` | Path to save interactive HTML 3D/Heatmap plot |
+| `-csv-file` | `benchmark_results/drift_grid.csv` | Path to save grid sweep CSV results |
 | `-queue-size` | `100000` | Task queue capacity per heap |
 | `-target` | `""` | Target URL (e.g. `http://localhost:8080`). Runs embedded if empty |
 | `-receiver-port` | `0` | Port for mock callback receiver (0 = auto ephemeral) |

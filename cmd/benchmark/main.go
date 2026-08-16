@@ -6,12 +6,13 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 func main() {
-	scenarioFlag := flag.String("scenario", "throughput", "Benchmark scenario: throughput | accuracy | flood | scaling | all")
+	scenarioFlag := flag.String("scenario", "throughput", "Benchmark scenario: throughput | accuracy | flood | scaling | grid | all")
 	requestsFlag := flag.Int("requests", 5000, "Total number of timer requests to send")
 	concurrencyFlag := flag.Int("concurrency", 50, "Number of concurrent worker goroutines")
 	rateLimitFlag := flag.Int("rate", 0, "Max requests per second throttle (0 for maximum speed)")
@@ -24,14 +25,14 @@ func main() {
 	workersFlag := flag.Int("workers", 4, "Number of notification workers per heap")
 	heapsListFlag := flag.String("heaps-list", "1,2,4,8,16,32", "Comma-separated heaps list for grid exploration (e.g. 1,2,4,8,16)")
 	workersListFlag := flag.String("workers-list", "1,2,4,8,16", "Comma-separated workers per heap list for grid exploration")
-	plotFileFlag := flag.String("plot-file", "drift_plot.html", "Path to save interactive HTML 3D/Heatmap plot")
-	csvFileFlag := flag.String("csv-file", "drift_grid.csv", "Path to save grid sweep CSV results")
+	plotFileFlag := flag.String("plot-file", "benchmark_results/drift_plot.html", "Path to save interactive HTML 3D/Heatmap plot")
+	csvFileFlag := flag.String("csv-file", "benchmark_results/drift_grid.csv", "Path to save grid sweep CSV results")
 	queueSizeFlag := flag.Int("queue-size", 100000, "Task capacity per heap")
 	targetURLFlag := flag.String("target", "", "Target URL of running atimer server (e.g. http://localhost:8080). If empty, runs embedded.")
 	receiverPortFlag := flag.Int("receiver-port", 0, "Port for mock callback receiver (0 = auto ephemeral)")
 	receiverLatencyFlag := flag.Duration("receiver-latency", 0, "Simulated callback response delay (simulating slow webhook endpoints)")
 	outputFlag := flag.String("output", "table", "Output format: table | json | markdown")
-	reportFileFlag := flag.String("report-file", "", "Optional path to write benchmark report")
+	reportFileFlag := flag.String("report-file", "", "Optional path to write benchmark report (e.g. benchmark_results/report.md)")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose server logging")
 	flag.Parse()
 
@@ -200,6 +201,9 @@ func main() {
 			}
 		}
 
+		if dir := filepath.Dir(cfg.ReportFile); dir != "." && dir != "" {
+			_ = os.MkdirAll(dir, 0755)
+		}
 		if err := os.WriteFile(cfg.ReportFile, []byte(reportContent), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write report file: %v\n", err)
 		} else {
