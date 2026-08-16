@@ -40,7 +40,14 @@ func (h *TimerEventHandler) Handler() {
 }
 
 func (h *TimerEventHandler) Dispatch(task *TimerTask) {
-	h.EventQueue <- task
+	if h.WorkerCount == 0 {
+		return
+	}
+	select {
+	case h.EventQueue <- task:
+	default:
+		log.Printf("EventHandler %d queue full, dropped task %s", h.ID, task.ID)
+	}
 }
 
 func (h *TimerEventHandler) ShootEvent(task *TimerTask) {

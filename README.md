@@ -58,6 +58,7 @@ curl -X POST http://localhost:8080/api \
 
 - API Endpoint reference [here](docs/endpoints.md)
 - Timer Architecture details [here](docs/architecture.md)
+- Benchmarking & Performance Guide [here](docs/benchmarks.md)
 - Bruno collection [here](bruno/)
 - System whiteboard drawings (excalidraw) [here](docs/whiteboard.excalidraw)
 - Just a journal about this project [here](docs/journal.md)

@@ -26,20 +26,24 @@ func (t *Timer) StartServer(addr string) error {
 			return
 		}
 
-		fireInSec, err := strconv.Atoi(fireInSecStr)
-		if err != nil {
-			http.Error(w, "Invalid timer_time, must be an integer", http.StatusBadRequest)
+		fireInSec, err := strconv.ParseFloat(fireInSecStr, 64)
+		if err != nil || fireInSec < 0 {
+			http.Error(w, "Invalid timer_time, must be a non-negative number", http.StatusBadRequest)
 			return
 		}
 
 		task := &TimerTask{
 			ID:          id,
-			FireAt:      time.Now().Add(time.Duration(fireInSec) * time.Second),
+			FireAt:      time.Now().Add(time.Duration(fireInSec * float64(time.Second))),
 			CallBackURL: callbackURL,
 		}
 
-		heapID := t.AddTask(task)
-		log.Printf("Routed task %s to heap %d (expires in %ds)", task.ID, heapID, fireInSec)
+		heapID, ok := t.AddTask(task)
+		if !ok {
+			http.Error(w, fmt.Sprintf("Heap %d queue capacity reached", heapID), http.StatusServiceUnavailable)
+			return
+		}
+		log.Printf("Routed task %s to heap %d (expires in %.2fs)", task.ID, heapID, fireInSec)
 
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintf(w, "success: routed to heap %d\n", heapID)

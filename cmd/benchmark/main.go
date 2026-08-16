@@ -1,0 +1,181 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	scenarioFlag := flag.String("scenario", "throughput", "Benchmark scenario: throughput | accuracy | flood | scaling | all")
+	requestsFlag := flag.Int("requests", 5000, "Total number of timer requests to send")
+	concurrencyFlag := flag.Int("concurrency", 50, "Number of concurrent worker goroutines")
+	rateLimitFlag := flag.Int("rate", 0, "Max requests per second throttle (0 for maximum speed)")
+	delayFlag := flag.Duration("delay", 1*time.Second, "Timer expiration delay for accuracy/flood tests (e.g. 500ms, 1s, 2s)")
+	heapsFlag := flag.Int("heaps", 4, "Number of heaps for embedded atimer instance")
+	workersFlag := flag.Int("workers", 4, "Number of notification workers per heap")
+	queueSizeFlag := flag.Int("queue-size", 100000, "Task capacity per heap")
+	targetURLFlag := flag.String("target", "", "Target URL of running atimer server (e.g. http://localhost:8080). If empty, runs embedded.")
+	receiverPortFlag := flag.Int("receiver-port", 0, "Port for mock callback receiver (0 = auto ephemeral)")
+	receiverLatencyFlag := flag.Duration("receiver-latency", 0, "Simulated callback response delay")
+	outputFlag := flag.String("output", "table", "Output format: table | json | markdown")
+	reportFileFlag := flag.String("report-file", "", "Optional path to write benchmark report")
+	verboseFlag := flag.Bool("verbose", false, "Enable verbose server logging")
+	flag.Parse()
+
+	if !*verboseFlag {
+		log.SetOutput(io.Discard)
+	}
+
+	cfg := BenchmarkConfig{
+		Scenario:        strings.ToLower(*scenarioFlag),
+		TotalRequests:   *requestsFlag,
+		Concurrency:     *concurrencyFlag,
+		RateLimit:       *rateLimitFlag,
+		TimerDelay:      *delayFlag,
+		Heaps:           *heapsFlag,
+		Workers:         *workersFlag,
+		QueueSize:       *queueSizeFlag,
+		TargetURL:       *targetURLFlag,
+		ReceiverPort:    *receiverPortFlag,
+		ReceiverLatency: *receiverLatencyFlag,
+		OutputFormat:    strings.ToLower(*outputFlag),
+		ReportFile:      *reportFileFlag,
+	}
+
+	modeDesc := "Embedded Instance"
+	if cfg.TargetURL != "" {
+		modeDesc = fmt.Sprintf("External Server (%s)", cfg.TargetURL)
+	}
+
+	fmt.Println("================================================================================")
+	fmt.Println("                       ATIMER HIGH-PERFORMANCE BENCHMARK                        ")
+	fmt.Println("================================================================================")
+	fmt.Printf(" Mode:        %s\n", modeDesc)
+	fmt.Printf(" Scenario:    %s\n", cfg.Scenario)
+	fmt.Printf(" Requests:    %d\n", cfg.TotalRequests)
+	fmt.Printf(" Concurrency: %d workers\n", cfg.Concurrency)
+	if cfg.RateLimit > 0 {
+		fmt.Printf(" Rate Limit:  %d req/s\n", cfg.RateLimit)
+	}
+	if cfg.TargetURL == "" {
+		fmt.Printf(" Config:      %d heaps, %d workers/heap, %d queue size/heap\n", cfg.Heaps, cfg.Workers, cfg.QueueSize)
+	}
+	fmt.Println("================================================================================")
+
+	var results []*BenchmarkResult
+
+	switch cfg.Scenario {
+	case "throughput":
+		res, err := RunThroughputScenario(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error running throughput benchmark: %v\n", err)
+			os.Exit(1)
+		}
+		results = append(results, res)
+
+	case "accuracy":
+		res, err := RunAccuracyScenario(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error running accuracy benchmark: %v\n", err)
+			os.Exit(1)
+		}
+		results = append(results, res)
+
+	case "flood":
+		res, err := RunFloodScenario(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error running flood benchmark: %v\n", err)
+			os.Exit(1)
+		}
+		results = append(results, res)
+
+	case "scaling":
+		sweepResults, err := RunScalingSweep(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error running scaling benchmark: %v\n", err)
+			os.Exit(1)
+		}
+		results = append(results, sweepResults...)
+
+	case "all":
+		fmt.Println("\n>>> [1/4] Running Ingestion Throughput Test...")
+		if res, err := RunThroughputScenario(cfg); err == nil {
+			results = append(results, res)
+			PrintTable(res)
+		}
+
+		fmt.Println("\n>>> [2/4] Running Timer Accuracy & Drift Test...")
+		accCfg := cfg
+		accCfg.TotalRequests = min(cfg.TotalRequests, 2000)
+		if res, err := RunAccuracyScenario(accCfg); err == nil {
+			results = append(results, res)
+			PrintTable(res)
+		}
+
+		fmt.Println("\n>>> [3/4] Running Task Flood / Burst Test...")
+		floodCfg := cfg
+		floodCfg.TotalRequests = min(cfg.TotalRequests, 2000)
+		if res, err := RunFloodScenario(floodCfg); err == nil {
+			results = append(results, res)
+			PrintTable(res)
+		}
+
+		fmt.Println("\n>>> [4/4] Running Multi-Heap Scaling Sweep...")
+		sweepCfg := cfg
+		sweepCfg.TotalRequests = min(cfg.TotalRequests, 5000)
+		if sweepResults, err := RunScalingSweep(sweepCfg); err == nil {
+			results = append(results, sweepResults...)
+		}
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown scenario '%s'. Available: throughput, accuracy, flood, scaling, all\n", cfg.Scenario)
+		os.Exit(1)
+	}
+
+	// Output Formatting
+	if cfg.Scenario != "all" {
+		for _, res := range results {
+			if cfg.OutputFormat == "json" {
+				fmt.Println(ToJSON(res))
+			} else if cfg.OutputFormat == "markdown" {
+				fmt.Print(ToMarkdown(res))
+			} else {
+				PrintTable(res)
+			}
+		}
+	}
+
+	// Save Report if requested
+	if cfg.ReportFile != "" {
+		var reportContent string
+		if strings.HasSuffix(cfg.ReportFile, ".json") {
+			for _, r := range results {
+				reportContent += ToJSON(r) + "\n"
+			}
+		} else {
+			reportContent = "# atimer Benchmark Report\n\n"
+			reportContent += fmt.Sprintf("Generated at: %s\n\n", time.Now().Format(time.RFC3339))
+			for _, r := range results {
+				reportContent += ToMarkdown(r)
+			}
+		}
+
+		if err := os.WriteFile(cfg.ReportFile, []byte(reportContent), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write report file: %v\n", err)
+		} else {
+			fmt.Printf("Benchmark report saved to %s\n", cfg.ReportFile)
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
