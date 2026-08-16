@@ -25,12 +25,16 @@ type BenchmarkConfig struct {
 	WaveSize        int           // Requests per flood wave
 	Heaps           int
 	Workers         int
+	HeapsList       []int         // List of heaps to test in grid scenario
+	WorkersList     []int         // List of workers per heap to test in grid scenario
 	QueueSize       int
 	TargetURL       string
 	ReceiverPort    int
 	ReceiverLatency time.Duration
 	OutputFormat    string
 	ReportFile      string
+	PlotFile        string        // Path to output interactive HTML plot
+	CSVFile         string        // Path to output grid CSV data
 }
 
 type ScheduledTaskInfo struct {
@@ -441,4 +445,87 @@ func RunScalingSweep(cfg BenchmarkConfig) ([]*BenchmarkResult, error) {
 	fmt.Println("--------------------------------------------------------------------------------")
 
 	return results, nil
+}
+
+func RunGridSweep(cfg BenchmarkConfig) (*GridResult, error) {
+	heapsList := cfg.HeapsList
+	if len(heapsList) == 0 {
+		heapsList = []int{1, 2, 4, 8, 16, 32}
+	}
+	workersList := cfg.WorkersList
+	if len(workersList) == 0 {
+		workersList = []int{1, 2, 4, 8, 16}
+	}
+
+	totalCombinations := len(heapsList) * len(workersList)
+	fmt.Printf("\n================================================================================\n")
+	fmt.Printf("  RUNNING 2D PARAMETER EXPLORATION: %d Combinations (%d requests/test)\n", totalCombinations, cfg.TotalRequests)
+	fmt.Printf("  Heaps:   %v\n", heapsList)
+	fmt.Printf("  Workers: %v per heap\n", workersList)
+	fmt.Printf("================================================================================\n\n")
+
+	gridRes := &GridResult{
+		HeapsList:   heapsList,
+		WorkersList: workersList,
+		Points:      make([]GridPoint, 0, totalCombinations),
+		Matrix:      make([][]float64, len(heapsList)),
+	}
+
+	idx := 0
+	for hIdx, h := range heapsList {
+		gridRes.Matrix[hIdx] = make([]float64, len(workersList))
+		for wIdx, w := range workersList {
+			idx++
+			cellCfg := cfg
+			cellCfg.Heaps = h
+			cellCfg.Workers = w
+			cellCfg.TargetURL = "" // Embedded server with specific (H, W)
+			cellCfg.Waves = 1
+			cellCfg.Duration = 0
+
+			fmt.Printf(" [%2d/%2d] Testing Heaps=%-2d | Workers=%-2d (Total Workers=%-3d)... ",
+				idx, totalCombinations, h, w, h*w)
+
+			floodRes, err := RunFloodScenario(cellCfg)
+			if err != nil {
+				return nil, fmt.Errorf("grid cell (H=%d, W=%d) failed: %w", h, w, err)
+			}
+
+			maxDrift := time.Duration(0)
+			p99Drift := time.Duration(0)
+			p95Drift := time.Duration(0)
+			p50Drift := time.Duration(0)
+			meanDrift := time.Duration(0)
+
+			if floodRes.Drift != nil {
+				maxDrift = floodRes.Drift.Max
+				p99Drift = floodRes.Drift.P99
+				p95Drift = floodRes.Drift.P95
+				p50Drift = floodRes.Drift.P50
+				meanDrift = floodRes.Drift.Mean
+			}
+
+			maxDriftMs := float64(maxDrift) / float64(time.Millisecond)
+			gridRes.Matrix[hIdx][wIdx] = maxDriftMs
+
+			point := GridPoint{
+				Heaps:        h,
+				Workers:      w,
+				TotalWorkers: h * w,
+				MaxDrift:     maxDrift,
+				P99Drift:     p99Drift,
+				P95Drift:     p95Drift,
+				P50Drift:     p50Drift,
+				MeanDrift:    meanDrift,
+				Throughput:   floodRes.RequestsPerSec,
+				DeliveryRate: floodRes.DeliveryRate,
+			}
+			gridRes.Points = append(gridRes.Points, point)
+
+			fmt.Printf("=> Max Drift: %7.2fms | P99: %7.2fms | P50: %7.2fms\n",
+				maxDriftMs, float64(p99Drift)/float64(time.Millisecond), float64(p50Drift)/float64(time.Millisecond))
+		}
+	}
+
+	return gridRes, nil
 }

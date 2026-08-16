@@ -22,6 +22,10 @@ func main() {
 	waveSizeFlag := flag.Int("wave-size", 0, "Number of tasks per flood wave (default: -requests)")
 	heapsFlag := flag.Int("heaps", 4, "Number of heaps for embedded atimer instance")
 	workersFlag := flag.Int("workers", 4, "Number of notification workers per heap")
+	heapsListFlag := flag.String("heaps-list", "1,2,4,8,16,32", "Comma-separated heaps list for grid exploration (e.g. 1,2,4,8,16)")
+	workersListFlag := flag.String("workers-list", "1,2,4,8,16", "Comma-separated workers per heap list for grid exploration")
+	plotFileFlag := flag.String("plot-file", "drift_plot.html", "Path to save interactive HTML 3D/Heatmap plot")
+	csvFileFlag := flag.String("csv-file", "drift_grid.csv", "Path to save grid sweep CSV results")
 	queueSizeFlag := flag.Int("queue-size", 100000, "Task capacity per heap")
 	targetURLFlag := flag.String("target", "", "Target URL of running atimer server (e.g. http://localhost:8080). If empty, runs embedded.")
 	receiverPortFlag := flag.Int("receiver-port", 0, "Port for mock callback receiver (0 = auto ephemeral)")
@@ -47,6 +51,10 @@ func main() {
 		WaveSize:        *waveSizeFlag,
 		Heaps:           *heapsFlag,
 		Workers:         *workersFlag,
+		HeapsList:       parseIntList(*heapsListFlag),
+		WorkersList:     parseIntList(*workersListFlag),
+		PlotFile:        *plotFileFlag,
+		CSVFile:         *csvFileFlag,
 		QueueSize:       *queueSizeFlag,
 		TargetURL:       *targetURLFlag,
 		ReceiverPort:    *receiverPortFlag,
@@ -110,6 +118,25 @@ func main() {
 		}
 		results = append(results, sweepResults...)
 
+	case "grid":
+		gridRes, err := RunGridSweep(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error running grid sweep: %v\n", err)
+			os.Exit(1)
+		}
+		PrintGridTerminalTable(gridRes)
+		if cfg.CSVFile != "" {
+			if err := SaveGridCSV(gridRes, cfg.CSVFile); err == nil {
+				fmt.Printf(" Grid data exported to CSV: %s\n", cfg.CSVFile)
+			}
+		}
+		if cfg.PlotFile != "" {
+			if err := GenerateInteractivePlotHTML(gridRes, cfg.PlotFile); err == nil {
+				fmt.Printf(" Interactive 3D / Heatmap plot generated: %s\n", cfg.PlotFile)
+				fmt.Printf(" -> Open this file in your browser to view the interactive 3D Surface & Heatmap:\n    file://%s/%s\n\n", mustGetCwd(), cfg.PlotFile)
+			}
+		}
+
 	case "all":
 		fmt.Println("\n>>> [1/4] Running Ingestion Throughput Test...")
 		if res, err := RunThroughputScenario(cfg); err == nil {
@@ -141,12 +168,12 @@ func main() {
 		}
 
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown scenario '%s'. Available: throughput, accuracy, flood, scaling, all\n", cfg.Scenario)
+		fmt.Fprintf(os.Stderr, "Unknown scenario '%s'. Available: throughput, accuracy, flood, scaling, grid, all\n", cfg.Scenario)
 		os.Exit(1)
 	}
 
 	// Output Formatting
-	if cfg.Scenario != "all" {
+	if cfg.Scenario != "all" && cfg.Scenario != "grid" {
 		for _, res := range results {
 			if cfg.OutputFormat == "json" {
 				fmt.Println(ToJSON(res))
@@ -179,6 +206,30 @@ func main() {
 			fmt.Printf("Benchmark report saved to %s\n", cfg.ReportFile)
 		}
 	}
+}
+
+func parseIntList(s string) []int {
+	parts := strings.Split(s, ",")
+	var res []int
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		var val int
+		if _, err := fmt.Sscanf(p, "%d", &val); err == nil && val > 0 {
+			res = append(res, val)
+		}
+	}
+	return res
+}
+
+func mustGetCwd() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
 }
 
 func min(a, b int) int {
