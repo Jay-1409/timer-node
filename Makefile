@@ -30,8 +30,11 @@ bench-flood: build
 bench-scaling: build
 	./bin/benchmark -scenario scaling -requests 10000 -concurrency 50
 
+bench-grid: build
+	./bin/benchmark -scenario grid -heaps-list 1,2,4,8,16,32 -workers-list 1,2,4,8,16 -requests 2000 -delay 1s -plot-file drift_plot.html -csv-file drift_grid.csv
+
 bench-all: build
 	./bin/benchmark -scenario all -requests 5000 -concurrency 50 -report-file benchmark_report.md
 
 clean:
-	rm -rf bin/ benchmark_report.md
+	rm -rf bin/ benchmark_report.md drift_plot.html drift_grid.csv
