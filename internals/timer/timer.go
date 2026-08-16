@@ -28,10 +28,10 @@ func (t *Timer) Start() {
 	We are using cpu instructions for adding 1 thus we dont need to worry about
 	sync here.
 */
-func (t *Timer) AddTask(task *TimerTask) int {
+func (t *Timer) AddTask(task *TimerTask) (int, bool) {
 	idx := atomic.AddUint32(&t.nextHeapIndex, 1)
 	curHeapIndex := int(idx % uint32(len(t.Heaps)))
 	chosenHeap := t.Heaps[curHeapIndex]
-	chosenHeap.AddTask(task)
-	return chosenHeap.ID
+	ok := chosenHeap.AddTask(task)
+	return chosenHeap.ID, ok
 }
