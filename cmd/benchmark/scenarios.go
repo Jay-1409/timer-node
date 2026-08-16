@@ -19,6 +19,10 @@ type BenchmarkConfig struct {
 	Concurrency     int
 	RateLimit       int // RPS limit (0 = unlimited)
 	TimerDelay      time.Duration
+	Duration        time.Duration // Total duration for sustained flood / soak tests
+	Waves           int           // Number of flood burst waves
+	WaveInterval    time.Duration // Time between flood waves
+	WaveSize        int           // Requests per flood wave
 	Heaps           int
 	Workers         int
 	QueueSize       int
@@ -294,58 +298,113 @@ func RunFloodScenario(cfg BenchmarkConfig) (*BenchmarkResult, error) {
 	collector := NewMetricCollector()
 	client := getHTTPClient(cfg.Concurrency)
 
-	// In flood scenario, all tasks are targeted to fire at the EXACT SAME target time
-	targetFireTime := time.Now().Add(cfg.TimerDelay)
-	scheduledTasks := make([]ScheduledTaskInfo, cfg.TotalRequests)
+	// Determine wave parameters
+	totalWaves := cfg.Waves
+	if totalWaves <= 0 {
+		totalWaves = 1
+	}
+	waveSize := cfg.WaveSize
+	if waveSize <= 0 {
+		if cfg.Waves > 1 {
+			waveSize = cfg.TotalRequests / cfg.Waves
+			if waveSize <= 0 {
+				waveSize = 1000
+			}
+		} else {
+			waveSize = cfg.TotalRequests
+		}
+	}
+	waveInterval := cfg.WaveInterval
+	if waveInterval <= 0 {
+		waveInterval = cfg.TimerDelay + 500*time.Millisecond
+	}
+
+	// If Duration is set, calculate total waves to fill the duration
+	if cfg.Duration > 0 {
+		calculatedWaves := int(cfg.Duration / waveInterval)
+		if calculatedWaves < 1 {
+			calculatedWaves = 1
+		}
+		totalWaves = calculatedWaves
+	}
+
+	totalScheduledCount := totalWaves * waveSize
+
+	fmt.Printf(" [Sustained Flood] Starting %d waves of %d tasks (Total: %d tasks, Wave Interval: %v, Timer Delay: %v)\n",
+		totalWaves, waveSize, totalScheduledCount, waveInterval, cfg.TimerDelay)
+	if cfg.ReceiverLatency > 0 {
+		fmt.Printf(" [Sustained Flood] Mock Callback Processing Delay: %v (Simulating slow endpoints)\n", cfg.ReceiverLatency)
+	}
+	fmt.Println("--------------------------------------------------------------------------------")
+
+	var allScheduledTasks []ScheduledTaskInfo
 	var taskMu sync.Mutex
 
-	jobs := make(chan int, cfg.TotalRequests)
-	for i := 0; i < cfg.TotalRequests; i++ {
-		jobs <- i
-	}
-	close(jobs)
-
-	var wg sync.WaitGroup
 	collector.Start()
+	benchStart := time.Now()
 
-	for w := 0; w < cfg.Concurrency; w++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for jobID := range jobs {
-				taskID := fmt.Sprintf("flood-%d-%d", workerID, jobID)
-				delay := time.Until(targetFireTime).Seconds()
-				if delay < 0.05 {
-					delay = 0.05
-				}
+	for wave := 0; wave < totalWaves; wave++ {
+		waveStartTime := time.Now()
+		targetFireTime := waveStartTime.Add(cfg.TimerDelay)
 
-				latency, success := sendScheduleRequest(client, targetURL, taskID, delay, receiver.URL())
-				collector.RecordRequest(latency, success)
+		waveJobs := make(chan int, waveSize)
+		for j := 0; j < waveSize; j++ {
+			waveJobs <- j
+		}
+		close(waveJobs)
 
-				if success {
-					taskMu.Lock()
-					scheduledTasks[jobID] = ScheduledTaskInfo{
-						ID:     taskID,
-						FireAt: targetFireTime,
+		var wg sync.WaitGroup
+		for w := 0; w < cfg.Concurrency; w++ {
+			wg.Add(1)
+			go func(workerID int) {
+				defer wg.Done()
+				for jobID := range waveJobs {
+					taskID := fmt.Sprintf("flood-w%d-%d-%d", wave, workerID, jobID)
+					delay := time.Until(targetFireTime).Seconds()
+					if delay < 0.01 {
+						delay = 0.01
 					}
-					taskMu.Unlock()
+
+					latency, success := sendScheduleRequest(client, targetURL, taskID, delay, receiver.URL())
+					collector.RecordRequest(latency, success)
+
+					if success {
+						taskMu.Lock()
+						allScheduledTasks = append(allScheduledTasks, ScheduledTaskInfo{
+							ID:     taskID,
+							FireAt: targetFireTime,
+						})
+						taskMu.Unlock()
+					}
 				}
+			}(w)
+		}
+
+		wg.Wait()
+
+		receivedSoFar := receiver.TotalReceived()
+		expectedSoFar := (wave + 1) * waveSize
+		fmt.Printf("   -> [Wave %2d/%2d] Scheduled %d tasks | Callbacks Drained: %d / %d (Elapsed: %v)\n",
+			wave+1, totalWaves, waveSize, receivedSoFar, expectedSoFar, time.Since(benchStart).Round(time.Millisecond))
+
+		// Wait until next wave if more waves remain
+		if wave < totalWaves-1 {
+			timeElapsed := time.Since(waveStartTime)
+			if timeElapsed < waveInterval {
+				time.Sleep(waveInterval - timeElapsed)
 			}
-		}(w)
+		}
 	}
 
-	wg.Wait()
-
-	// Wait until flood expires and callbacks drain
-	timeToWait := time.Until(targetFireTime) + 15*time.Second
-	if timeToWait < 5*time.Second {
-		timeToWait = 5 * time.Second
-	}
-	receivedTotal := receiver.WaitForCount(cfg.TotalRequests, timeToWait)
+	// Wait for final wave drain
+	fmt.Println("   -> Waiting for final callback wave to drain...")
+	maxDrainWait := cfg.TimerDelay + 30*time.Second
+	receivedTotal := receiver.WaitForCount(totalScheduledCount, maxDrainWait)
 
 	collector.Stop()
 
-	for _, task := range scheduledTasks {
+	// Compute drift for all scheduled tasks
+	for _, task := range allScheduledTasks {
 		if task.ID == "" {
 			continue
 		}
@@ -355,7 +414,7 @@ func RunFloodScenario(cfg BenchmarkConfig) (*BenchmarkResult, error) {
 		}
 	}
 
-	return collector.BuildResult("Flood & Burst Handling", cfg.TotalRequests, receivedTotal), nil
+	return collector.BuildResult("Flood & Burst Handling (Sustained)", totalScheduledCount, receivedTotal), nil
 }
 
 func RunScalingSweep(cfg BenchmarkConfig) ([]*BenchmarkResult, error) {

@@ -16,12 +16,16 @@ func main() {
 	concurrencyFlag := flag.Int("concurrency", 50, "Number of concurrent worker goroutines")
 	rateLimitFlag := flag.Int("rate", 0, "Max requests per second throttle (0 for maximum speed)")
 	delayFlag := flag.Duration("delay", 1*time.Second, "Timer expiration delay for accuracy/flood tests (e.g. 500ms, 1s, 2s)")
+	durationFlag := flag.Duration("duration", 0, "Total duration for sustained flood / soak tests (e.g. 30s, 1m). Overrides -waves if > 0")
+	wavesFlag := flag.Int("waves", 1, "Number of flood waves to blast")
+	waveIntervalFlag := flag.Duration("wave-interval", 0, "Time interval between flood waves (default: delay + 500ms)")
+	waveSizeFlag := flag.Int("wave-size", 0, "Number of tasks per flood wave (default: -requests)")
 	heapsFlag := flag.Int("heaps", 4, "Number of heaps for embedded atimer instance")
 	workersFlag := flag.Int("workers", 4, "Number of notification workers per heap")
 	queueSizeFlag := flag.Int("queue-size", 100000, "Task capacity per heap")
 	targetURLFlag := flag.String("target", "", "Target URL of running atimer server (e.g. http://localhost:8080). If empty, runs embedded.")
 	receiverPortFlag := flag.Int("receiver-port", 0, "Port for mock callback receiver (0 = auto ephemeral)")
-	receiverLatencyFlag := flag.Duration("receiver-latency", 0, "Simulated callback response delay")
+	receiverLatencyFlag := flag.Duration("receiver-latency", 0, "Simulated callback response delay (simulating slow webhook endpoints)")
 	outputFlag := flag.String("output", "table", "Output format: table | json | markdown")
 	reportFileFlag := flag.String("report-file", "", "Optional path to write benchmark report")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose server logging")
@@ -37,6 +41,10 @@ func main() {
 		Concurrency:     *concurrencyFlag,
 		RateLimit:       *rateLimitFlag,
 		TimerDelay:      *delayFlag,
+		Duration:        *durationFlag,
+		Waves:           *wavesFlag,
+		WaveInterval:    *waveIntervalFlag,
+		WaveSize:        *waveSizeFlag,
 		Heaps:           *heapsFlag,
 		Workers:         *workersFlag,
 		QueueSize:       *queueSizeFlag,
